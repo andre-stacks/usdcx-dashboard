@@ -505,15 +505,19 @@ export default function USDCxDashboard() {
 
         const [tokenInfoResult, holdersResult, txResult, metricsResult] = results;
 
+        // Track if official metrics provided supply (highest priority)
+        let metricsProvidedSupply = false;
+
         // Process USDCx official metrics (highest priority for accurate data)
         if (metricsResult.status === 'fulfilled' && metricsResult.value) {
           const metrics = metricsResult.value;
           setUsdcxMetrics(metrics.mainnet);
           setDebugInfo((prev) => prev + `\nUSDCx metrics loaded: supply=${metrics.mainnet?.totalSupply}, holders=${metrics.mainnet?.uniqueHolders}`);
 
-          // Use official supply if available
-          if (metrics.mainnet?.totalSupply) {
+          // Use official supply if available (nullish check to preserve 0)
+          if (metrics.mainnet?.totalSupply != null) {
             setTotalSupply(metrics.mainnet.totalSupply);
+            metricsProvidedSupply = true;
           }
         } else {
           setDebugInfo(
@@ -523,17 +527,13 @@ export default function USDCxDashboard() {
           );
         }
 
-        // Process token info
+        // Process token info (store for decimals reference)
+        let tokenDecimals = 6; // default
         if (tokenInfoResult.status === 'fulfilled' && tokenInfoResult.value) {
           const info = tokenInfoResult.value;
           setTokenInfo(info);
-          setDebugInfo((prev) => prev + `\nToken info loaded: ${info.name}`);
-
-          const decimals = info.decimals || 6;
-          const supply = info.total_supply
-            ? parseInt(info.total_supply) / Math.pow(10, decimals)
-            : null;
-          setTotalSupply(supply);
+          tokenDecimals = info.decimals ?? 6;
+          setDebugInfo((prev) => prev + `\nToken info loaded: ${info.name}, decimals: ${tokenDecimals}`);
         } else {
           setDebugInfo(
             (prev) =>
@@ -545,13 +545,13 @@ export default function USDCxDashboard() {
         // Process holders
         if (holdersResult.status === 'fulfilled' && holdersResult.value?.results) {
           setHolders(holdersResult.value.results);
-          // Use total from holders endpoint for accurate holder count
-          if (holdersResult.value.total) {
+          // Use total from holders endpoint for accurate holder count (nullish check)
+          if (holdersResult.value.total != null) {
             setTotalHolderCount(holdersResult.value.total);
           }
-          // Use total_supply from holders endpoint (more reliable than metadata)
-          if (holdersResult.value.total_supply) {
-            const supply = parseInt(holdersResult.value.total_supply) / 1e6; // 6 decimals
+          // Only use holders supply if official metrics didn't provide it
+          if (!metricsProvidedSupply && holdersResult.value.total_supply != null) {
+            const supply = parseInt(holdersResult.value.total_supply) / Math.pow(10, tokenDecimals);
             setTotalSupply(supply);
             setDebugInfo(
               (prev) =>
@@ -560,7 +560,7 @@ export default function USDCxDashboard() {
           } else {
             setDebugInfo(
               (prev) =>
-                prev + `\nHolders loaded: ${holdersResult.value.results.length}`
+                prev + `\nHolders loaded: ${holdersResult.value.results.length}, total: ${holdersResult.value.total}`
             );
           }
         } else if (
@@ -633,7 +633,8 @@ export default function USDCxDashboard() {
 
   // Calculate stats - prefer official metrics when available
   // Priority: official metrics > API total count > array length
-  const totalHolders = usdcxMetrics?.uniqueHolders || totalHolderCount || holders.length;
+  // Use ?? to preserve valid 0 values (|| would treat 0 as falsy)
+  const totalHolders = usdcxMetrics?.uniqueHolders ?? totalHolderCount ?? holders.length;
   const totalTxCount = dailyData.reduce((sum, d) => sum + d.transactions, 0);
   const totalMinted = dailyData.reduce((sum, d) => sum + d.minted, 0);
   const totalBurned = dailyData.reduce((sum, d) => sum + d.burned, 0);
