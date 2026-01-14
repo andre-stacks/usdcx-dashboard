@@ -219,14 +219,101 @@ const fetchAllTransactions = async (totalLimit = 200) => {
   return { results: allResults };
 };
 
-// Fetch FT transfer events
-const fetchFTEvents = async (limit = 50) => {
-  const url = `${HIRO_API}/extended/v1/address/${FULL_CONTRACT}/assets?limit=${limit}`;
+// Fetch FT transfer events (includes mint, burn, transfer)
+const fetchFTEvents = async (limit = 50, offset = 0) => {
+  const url = `${HIRO_API}/extended/v1/address/${FULL_CONTRACT}/assets?limit=${Math.min(limit, 50)}&offset=${offset}`;
   return fetchWithRetry(url);
 };
 
+// Fetch all FT events with pagination
+const fetchAllFTEvents = async (totalLimit = 500) => {
+  const pageSize = 50;
+  const pages = Math.ceil(totalLimit / pageSize);
+  const allResults = [];
+
+  for (let i = 0; i < pages; i++) {
+    try {
+      const result = await fetchFTEvents(pageSize, i * pageSize);
+      if (result?.results) {
+        allResults.push(...result.results);
+      }
+      // Stop if we got fewer results than requested
+      if (!result?.results || result.results.length < pageSize) {
+        break;
+      }
+    } catch (error) {
+      console.error(`Failed to fetch FT events page ${i + 1}:`, error);
+      break;
+    }
+  }
+
+  return { results: allResults };
+};
+
+// Process FT events into daily mint/burn aggregates
+const processFTEventsToDaily = (events) => {
+  if (!events || !Array.isArray(events)) {
+    console.warn('No FT events to process');
+    return new Map();
+  }
+
+  const dailyMap = new Map();
+
+  events.forEach((event) => {
+    // Only process FT events for USDCx token
+    if (event.asset?.asset_id !== FULL_ASSET_ID &&
+        !event.asset?.asset_id?.includes(CONTRACT_NAME)) {
+      return;
+    }
+
+    const timestamp = event.block_height ? Date.now() / 1000 : null; // Approximate if no timestamp
+    const eventTime = event.tx?.block_time || event.tx?.burn_block_time || timestamp;
+    if (!eventTime) return;
+
+    const date = new Date(eventTime * 1000).toISOString().split('T')[0];
+    const existing = dailyMap.get(date) || {
+      date,
+      minted: 0,
+      burned: 0,
+      transfers: 0,
+    };
+
+    const amount = parseInt(event.amount || 0);
+    const eventType = event.event_type;
+
+    // Detect mint: transfer from zero address or mint event
+    if (eventType === 'fungible_token_asset' && event.asset_event_type === 'mint') {
+      existing.minted += amount;
+    }
+    // Detect burn: transfer to zero address or burn event
+    else if (eventType === 'fungible_token_asset' && event.asset_event_type === 'burn') {
+      existing.burned += amount;
+    }
+    // Track transfers for volume
+    else if (eventType === 'fungible_token_asset' && event.asset_event_type === 'transfer') {
+      existing.transfers += 1;
+      // Check if sender is contract (could be mint) or recipient is contract (could be burn)
+      const sender = event.sender;
+      const recipient = event.recipient;
+
+      // Mint detection: tokens coming FROM the contract to a user
+      if (sender === FULL_CONTRACT || sender?.startsWith(CONTRACT_ADDRESS)) {
+        existing.minted += amount;
+      }
+      // Burn detection: tokens going TO the contract from a user
+      else if (recipient === FULL_CONTRACT || recipient?.startsWith(CONTRACT_ADDRESS)) {
+        existing.burned += amount;
+      }
+    }
+
+    dailyMap.set(date, existing);
+  });
+
+  return dailyMap;
+};
+
 // Process transactions into daily aggregates
-const processTransactionsToDaily = (transactions) => {
+const processTransactionsToDaily = (transactions, ftEventsMap = new Map()) => {
   if (!transactions || !Array.isArray(transactions)) {
     console.warn('No transactions to process');
     return [];
@@ -252,22 +339,58 @@ const processTransactionsToDaily = (transactions) => {
 
     existing.transactions += 1;
 
-    // Check for mint/burn events in contract calls
+    // Check for mint/burn in transaction events
+    if (tx.events) {
+      tx.events.forEach((event) => {
+        if (event.event_type === 'fungible_token_asset') {
+          const amount = parseInt(event.asset?.amount || 0);
+          if (event.asset?.asset_event_type === 'mint') {
+            existing.minted += amount;
+          } else if (event.asset?.asset_event_type === 'burn') {
+            existing.burned += amount;
+          }
+        }
+      });
+    }
+
+    // Check for mint/burn in contract calls (bridge functions)
     if (tx.tx_type === 'contract_call') {
       const functionName = tx.contract_call?.function_name || '';
-      if (functionName.includes('mint')) {
-        const args = tx.contract_call?.function_args || [];
-        const amountArg = args.find((a) => a.name === 'amount');
+      const args = tx.contract_call?.function_args || [];
+
+      // USDCx bridge functions: deposit-from-eth (mint), withdraw-to-eth (burn)
+      if (functionName.includes('deposit') || functionName.includes('mint') || functionName.includes('bridge-in')) {
+        const amountArg = args.find((a) => a.name === 'amount' || a.name === 'ustx-amount');
         if (amountArg) {
           existing.minted += parseInt(amountArg.repr?.replace('u', '') || 0);
         }
-      } else if (functionName.includes('burn')) {
-        const args = tx.contract_call?.function_args || [];
-        const amountArg = args.find((a) => a.name === 'amount');
+      } else if (functionName.includes('withdraw') || functionName.includes('burn') || functionName.includes('bridge-out')) {
+        const amountArg = args.find((a) => a.name === 'amount' || a.name === 'ustx-amount');
         if (amountArg) {
           existing.burned += parseInt(amountArg.repr?.replace('u', '') || 0);
         }
       }
+    }
+
+    dailyMap.set(date, existing);
+  });
+
+  // Merge FT events data (more accurate for mint/burn)
+  ftEventsMap.forEach((ftData, date) => {
+    const existing = dailyMap.get(date) || {
+      date,
+      transactions: 0,
+      volume: 0,
+      minted: 0,
+      burned: 0,
+    };
+
+    // Use FT events data if it has mint/burn info
+    if (ftData.minted > 0) {
+      existing.minted = Math.max(existing.minted, ftData.minted);
+    }
+    if (ftData.burned > 0) {
+      existing.burned = Math.max(existing.burned, ftData.burned);
     }
 
     dailyMap.set(date, existing);
@@ -281,7 +404,10 @@ const processTransactionsToDaily = (transactions) => {
         month: 'short',
         day: 'numeric',
       }),
-      netFlow: d.minted - d.burned,
+      // Convert from micro-units to display units (6 decimals)
+      minted: d.minted / 1000000,
+      burned: d.burned / 1000000,
+      netFlow: (d.minted - d.burned) / 1000000,
     }));
 };
 
@@ -507,11 +633,12 @@ export default function USDCxDashboard() {
         const results = await Promise.allSettled([
           fetchTokenInfo(),
           fetchAllHolders(200),
-          fetchAllTransactions(200),
+          fetchAllTransactions(500), // Increased to get more transaction history
           fetchUSDCxMetrics(),
+          fetchAllFTEvents(500), // Fetch FT events for accurate mint/burn data
         ]);
 
-        const [tokenInfoResult, holdersResult, txResult, metricsResult] = results;
+        const [tokenInfoResult, holdersResult, txResult, metricsResult, ftEventsResult] = results;
 
         // Track if official metrics provided supply (highest priority)
         let metricsProvidedSupply = false;
@@ -587,14 +714,35 @@ export default function USDCxDashboard() {
           );
         }
 
-        // Process transactions
-        if (txResult.status === 'fulfilled' && txResult.value?.results) {
-          const processed = processTransactionsToDaily(txResult.value.results);
-          setDailyData(processed);
+        // Process FT events for mint/burn data
+        let ftEventsMap = new Map();
+        if (ftEventsResult.status === 'fulfilled' && ftEventsResult.value?.results) {
+          ftEventsMap = processFTEventsToDaily(ftEventsResult.value.results);
+          setDebugInfo(
+            (prev) =>
+              prev + `\nFT events loaded: ${ftEventsResult.value.results.length}`
+          );
+        } else {
           setDebugInfo(
             (prev) =>
               prev +
-              `\nTransactions loaded: ${txResult.value.results.length}, daily: ${processed.length}`
+              `\nFT events failed: ${ftEventsResult.reason?.message || 'Unknown error'}`
+          );
+        }
+
+        // Process transactions (merged with FT events for accurate mint/burn)
+        if (txResult.status === 'fulfilled' && txResult.value?.results) {
+          const processed = processTransactionsToDaily(txResult.value.results, ftEventsMap);
+          setDailyData(processed);
+
+          // Calculate totals for debug
+          const totalMinted = processed.reduce((sum, d) => sum + d.minted, 0);
+          const totalBurned = processed.reduce((sum, d) => sum + d.burned, 0);
+          setDebugInfo(
+            (prev) =>
+              prev +
+              `\nTransactions loaded: ${txResult.value.results.length}, daily: ${processed.length}` +
+              `\nMint/Burn totals: minted=${totalMinted.toFixed(2)}, burned=${totalBurned.toFixed(2)}`
           );
         } else {
           setDebugInfo(
@@ -644,14 +792,20 @@ export default function USDCxDashboard() {
   // Use ?? to preserve valid 0 values (|| would treat 0 as falsy)
   const totalHolders = usdcxMetrics?.uniqueHolders ?? totalHolderCount ?? holders.length;
   const totalTxCount = dailyData.reduce((sum, d) => sum + d.transactions, 0);
-  const totalMinted = dailyData.reduce((sum, d) => sum + d.minted, 0);
-  const totalBurned = dailyData.reduce((sum, d) => sum + d.burned, 0);
 
-  // Bridge stats from official API
+  // Bridge stats from official API (most accurate for total minted/burned)
   const bridgeIn = usdcxMetrics?.bridgeActions?.in || 0;
   const bridgeOut = usdcxMetrics?.bridgeActions?.out || 0;
   const totalDepositedEth = usdcxMetrics?.totalDepositedEth || 0;
   const isPaused = usdcxMetrics?.isPaused || false;
+
+  // Calculate mint/burn from daily data (for chart) or use bridge actions (for totals)
+  const dailyMinted = dailyData.reduce((sum, d) => sum + d.minted, 0);
+  const dailyBurned = dailyData.reduce((sum, d) => sum + d.burned, 0);
+
+  // Use bridge actions if available (more accurate), otherwise use daily data
+  const totalMinted = bridgeIn > 0 ? bridgeIn : dailyMinted;
+  const totalBurned = bridgeOut > 0 ? bridgeOut : dailyBurned;
 
   // Build holders over time (cumulative approximation)
   const holdersOverTime =
