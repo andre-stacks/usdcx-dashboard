@@ -331,6 +331,7 @@ const CustomTooltip = ({ active, payload, label, formatter }) => {
 
 const StatCard = ({ title, value, change, changeLabel, icon, loading }) => (
   <div
+    className="stat-card"
     style={{
       background:
         'linear-gradient(135deg, rgba(85, 70, 255, 0.1) 0%, rgba(255, 95, 31, 0.05) 100%)',
@@ -351,6 +352,7 @@ const StatCard = ({ title, value, change, changeLabel, icon, loading }) => (
     >
       <span style={{ fontSize: '20px' }}>{icon}</span>
       <span
+        className="stat-title"
         style={{
           color: '#a0a0b0',
           fontSize: '14px',
@@ -362,6 +364,7 @@ const StatCard = ({ title, value, change, changeLabel, icon, loading }) => (
       </span>
     </div>
     <div
+      className="stat-value"
       style={{
         fontSize: '32px',
         fontWeight: '700',
@@ -388,6 +391,7 @@ const StatCard = ({ title, value, change, changeLabel, icon, loading }) => (
 
 const ChartCard = ({ title, children, loading, noData }) => (
   <div
+    className="chart-card"
     style={{
       background: 'rgba(17, 17, 27, 0.6)',
       border: '1px solid rgba(85, 70, 255, 0.2)',
@@ -412,6 +416,7 @@ const ChartCard = ({ title, children, loading, noData }) => (
     </h3>
     {loading ? (
       <div
+        className="chart-container"
         style={{
           height: 300,
           display: 'flex',
@@ -427,6 +432,7 @@ const ChartCard = ({ title, children, loading, noData }) => (
       </div>
     ) : noData ? (
       <div
+        className="chart-container"
         style={{
           height: 300,
           display: 'flex',
@@ -441,7 +447,9 @@ const ChartCard = ({ title, children, loading, noData }) => (
         </div>
       </div>
     ) : (
-      children
+      <div className="chart-container" style={{ height: 300 }}>
+        {children}
+      </div>
     )}
   </div>
 );
@@ -663,6 +671,7 @@ export default function USDCxDashboard() {
 
   return (
     <div
+      className="dashboard-main"
       style={{
         minHeight: '100vh',
         background:
@@ -671,12 +680,15 @@ export default function USDCxDashboard() {
         fontFamily:
           '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
         padding: '32px',
+        maxWidth: '100vw',
+        overflowX: 'hidden',
       }}
     >
       {loading && <LoadingOverlay />}
 
       {/* Header */}
       <div
+        className="dashboard-header"
         style={{
           display: 'flex',
           justifyContent: 'space-between',
@@ -696,6 +708,7 @@ export default function USDCxDashboard() {
             }}
           >
             <div
+              className="dashboard-logo"
               style={{
                 width: '48px',
                 height: '48px',
@@ -706,12 +719,13 @@ export default function USDCxDashboard() {
                 justifyContent: 'center',
                 fontWeight: '700',
                 fontSize: '18px',
+                flexShrink: 0,
               }}
             >
               $
             </div>
             <div>
-              <h1 style={{ fontSize: '28px', fontWeight: '700', margin: 0 }}>
+              <h1 className="dashboard-title" style={{ fontSize: '28px', fontWeight: '700', margin: 0 }}>
                 {tokenInfo?.name || 'USDCx'} Dashboard
               </h1>
               <p
@@ -727,7 +741,7 @@ export default function USDCxDashboard() {
           </div>
         </div>
 
-        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+        <div className="time-range-buttons" style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
           <button
             onClick={handleRefresh}
             style={{
@@ -791,6 +805,7 @@ export default function USDCxDashboard() {
 
       {/* Contract Info */}
       <div
+        className="contract-info"
         style={{
           background: 'rgba(85, 70, 255, 0.1)',
           border: '1px solid rgba(85, 70, 255, 0.3)',
@@ -848,6 +863,7 @@ export default function USDCxDashboard() {
 
       {/* Stats Row */}
       <div
+        className="stats-row"
         style={{
           display: 'flex',
           gap: '20px',
@@ -887,9 +903,10 @@ export default function USDCxDashboard() {
 
       {/* Charts Grid */}
       <div
+        className="charts-grid"
         style={{
           display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(450px, 1fr))',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(min(450px, 100%), 1fr))',
           gap: '24px',
         }}
       >
@@ -899,7 +916,7 @@ export default function USDCxDashboard() {
           loading={loading}
           noData={holdersOverTime.length === 0}
         >
-          <ResponsiveContainer width="100%" height={300}>
+          <ResponsiveContainer width="100%" height="100%">
             <ComposedChart data={holdersOverTime}>
               <defs>
                 <linearGradient
@@ -944,7 +961,7 @@ export default function USDCxDashboard() {
           loading={loading}
           noData={filteredDaily.length === 0}
         >
-          <ResponsiveContainer width="100%" height={300}>
+          <ResponsiveContainer width="100%" height="100%">
             <BarChart data={filteredDaily}>
               <defs>
                 <linearGradient id="txGradient" x1="0" y1="0" x2="0" y2="1">
@@ -980,7 +997,7 @@ export default function USDCxDashboard() {
           loading={loading}
           noData={filteredDaily.length === 0}
         >
-          <ResponsiveContainer width="100%" height={300}>
+          <ResponsiveContainer width="100%" height="100%">
             <ComposedChart data={filteredDaily}>
               <CartesianGrid
                 strokeDasharray="3 3"

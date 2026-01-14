@@ -17,3 +17,222 @@ body {
 body {
   background: #0a0a12;
 }
+
+/* Mobile-first responsive styles */
+
+/* Prevent horizontal scroll on mobile */
+.dashboard-container {
+  width: 100%;
+  overflow-x: hidden;
+}
+
+/* Mobile breakpoints */
+@media screen and (max-width: 768px) {
+  /* Reduce padding on mobile */
+  .dashboard-main {
+    padding: 16px !important;
+  }
+
+  /* Stack header elements vertically */
+  .dashboard-header {
+    flex-direction: column !important;
+    align-items: flex-start !important;
+  }
+
+  /* Smaller title on mobile */
+  .dashboard-title {
+    font-size: 22px !important;
+  }
+
+  /* Smaller logo on mobile */
+  .dashboard-logo {
+    width: 40px !important;
+    height: 40px !important;
+    font-size: 16px !important;
+  }
+
+  /* Time range buttons wrap on mobile */
+  .time-range-buttons {
+    width: 100%;
+    justify-content: flex-start !important;
+    flex-wrap: wrap !important;
+  }
+
+  .time-range-buttons button {
+    padding: 6px 12px !important;
+    font-size: 13px !important;
+  }
+
+  /* Contract info stacks vertically */
+  .contract-info {
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    gap: 8px !important;
+  }
+
+  .contract-info code {
+    font-size: 11px !important;
+    word-break: break-all !important;
+    max-width: 100% !important;
+  }
+
+  .contract-info a {
+    margin-left: 0 !important;
+  }
+
+  /* Stat cards stack on mobile */
+  .stats-row {
+    flex-direction: column !important;
+    gap: 12px !important;
+  }
+
+  .stat-card {
+    min-width: 100% !important;
+    padding: 16px !important;
+  }
+
+  .stat-card .stat-value {
+    font-size: 24px !important;
+  }
+
+  .stat-card .stat-title {
+    font-size: 12px !important;
+  }
+
+  /* Charts full width on mobile */
+  .charts-grid {
+    grid-template-columns: 1fr !important;
+    gap: 16px !important;
+  }
+
+  .chart-card {
+    padding: 16px !important;
+    margin-bottom: 16px !important;
+  }
+
+  .chart-card h3 {
+    font-size: 16px !important;
+  }
+
+  /* Smaller chart height on mobile */
+  .chart-container {
+    height: 250px !important;
+  }
+
+  /* Table scrolls horizontally on mobile */
+  .table-container {
+    overflow-x: auto !important;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .holders-table {
+    min-width: 400px;
+  }
+
+  .holders-table th,
+  .holders-table td {
+    padding: 8px 12px !important;
+    font-size: 12px !important;
+  }
+
+  /* Address truncation on mobile */
+  .address-cell {
+    max-width: 120px !important;
+  }
+}
+
+/* Small mobile devices (iPhone SE, etc.) */
+@media screen and (max-width: 375px) {
+  .dashboard-main {
+    padding: 12px !important;
+  }
+
+  .dashboard-title {
+    font-size: 18px !important;
+  }
+
+  .dashboard-logo {
+    width: 36px !important;
+    height: 36px !important;
+  }
+
+  .stat-card .stat-value {
+    font-size: 20px !important;
+  }
+
+  .chart-container {
+    height: 200px !important;
+  }
+
+  .time-range-buttons button {
+    padding: 5px 10px !important;
+    font-size: 12px !important;
+  }
+}
+
+/* Tablet breakpoint */
+@media screen and (min-width: 769px) and (max-width: 1024px) {
+  .charts-grid {
+    grid-template-columns: 1fr !important;
+  }
+
+  .stats-row {
+    flex-wrap: wrap !important;
+  }
+
+  .stat-card {
+    min-width: calc(50% - 12px) !important;
+  }
+}
+
+/* Touch-friendly tap targets */
+@media (hover: none) and (pointer: coarse) {
+  button {
+    min-height: 44px;
+    min-width: 44px;
+  }
+
+  a {
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+  }
+}
+
+/* Safe area insets for notched devices (iPhone X+, Android) */
+@supports (padding: max(0px)) {
+  .dashboard-main {
+    padding-left: max(16px, env(safe-area-inset-left));
+    padding-right: max(16px, env(safe-area-inset-right));
+    padding-bottom: max(16px, env(safe-area-inset-bottom));
+  }
+}
+
+/* Improve text readability on mobile */
+@media screen and (max-width: 768px) {
+  body {
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+  }
+}
+
+/* Landscape mode adjustments */
+@media screen and (max-width: 896px) and (orientation: landscape) {
+  .dashboard-main {
+    padding: 12px 16px !important;
+  }
+
+  .stats-row {
+    flex-direction: row !important;
+    flex-wrap: wrap !important;
+  }
+
+  .stat-card {
+    min-width: calc(50% - 8px) !important;
+    padding: 12px !important;
+  }
+
+  .chart-container {
+    height: 200px !important;
+  }
+}
