@@ -19,7 +19,10 @@ import {
 // USDCx Contract Info
 const CONTRACT_ADDRESS = 'SP120SBRBQJ00MCWS7TM5R8WJNTTKD5K0HFRC2CNE';
 const CONTRACT_NAME = 'usdcx';
+const TOKEN_NAME = 'usdcx-token';
 const FULL_CONTRACT = `${CONTRACT_ADDRESS}.${CONTRACT_NAME}`;
+// Full asset identifier needed for token holder queries
+const FULL_ASSET_ID = `${FULL_CONTRACT}::${TOKEN_NAME}`;
 const HIRO_API = 'https://api.hiro.so';
 const USDCX_API = 'https://api.usdc-on-stacks.com';
 
@@ -147,8 +150,9 @@ const parsePrometheusMetrics = (text) => {
 };
 
 // Fetch token holders - max 50 per request
+// NOTE: Must use full asset identifier (contract::token-name) for holder queries
 const fetchHolders = async (limit = 50, offset = 0) => {
-  const url = `${HIRO_API}/extended/v1/tokens/ft/${FULL_CONTRACT}/holders?limit=${Math.min(limit, 50)}&offset=${offset}`;
+  const url = `${HIRO_API}/extended/v1/tokens/ft/${FULL_ASSET_ID}/holders?limit=${Math.min(limit, 50)}&offset=${offset}`;
   return fetchWithRetry(url);
 };
 
@@ -157,12 +161,19 @@ const fetchAllHolders = async (totalLimit = 200) => {
   const pageSize = 50;
   const pages = Math.ceil(totalLimit / pageSize);
   const allResults = [];
+  let totalSupply = null;
+  let totalHolders = null;
 
   for (let i = 0; i < pages; i++) {
     try {
       const result = await fetchHolders(pageSize, i * pageSize);
       if (result?.results) {
         allResults.push(...result.results);
+      }
+      // Capture total_supply and total from first response
+      if (i === 0) {
+        totalSupply = result?.total_supply;
+        totalHolders = result?.total;
       }
       // Stop if we got fewer results than requested (no more data)
       if (!result?.results || result.results.length < pageSize) {
@@ -174,7 +185,7 @@ const fetchAllHolders = async (totalLimit = 200) => {
     }
   }
 
-  return { results: allResults };
+  return { results: allResults, total_supply: totalSupply, total: totalHolders };
 };
 
 // Fetch contract transactions (transfers, mints, burns) - max 50 per request
@@ -467,6 +478,7 @@ export default function USDCxDashboard() {
   // Data state
   const [tokenInfo, setTokenInfo] = useState(null);
   const [holders, setHolders] = useState([]);
+  const [totalHolderCount, setTotalHolderCount] = useState(null);
   const [dailyData, setDailyData] = useState([]);
   const [totalSupply, setTotalSupply] = useState(null);
   const [usdcxMetrics, setUsdcxMetrics] = useState(null);
@@ -493,15 +505,19 @@ export default function USDCxDashboard() {
 
         const [tokenInfoResult, holdersResult, txResult, metricsResult] = results;
 
+        // Track if official metrics provided supply (highest priority)
+        let metricsProvidedSupply = false;
+
         // Process USDCx official metrics (highest priority for accurate data)
         if (metricsResult.status === 'fulfilled' && metricsResult.value) {
           const metrics = metricsResult.value;
           setUsdcxMetrics(metrics.mainnet);
           setDebugInfo((prev) => prev + `\nUSDCx metrics loaded: supply=${metrics.mainnet?.totalSupply}, holders=${metrics.mainnet?.uniqueHolders}`);
 
-          // Use official supply if available
-          if (metrics.mainnet?.totalSupply) {
+          // Use official supply if available (nullish check to preserve 0)
+          if (metrics.mainnet?.totalSupply != null) {
             setTotalSupply(metrics.mainnet.totalSupply);
+            metricsProvidedSupply = true;
           }
         } else {
           setDebugInfo(
@@ -511,17 +527,13 @@ export default function USDCxDashboard() {
           );
         }
 
-        // Process token info
+        // Process token info (store for decimals reference)
+        let tokenDecimals = 6; // default
         if (tokenInfoResult.status === 'fulfilled' && tokenInfoResult.value) {
           const info = tokenInfoResult.value;
           setTokenInfo(info);
-          setDebugInfo((prev) => prev + `\nToken info loaded: ${info.name}`);
-
-          const decimals = info.decimals || 6;
-          const supply = info.total_supply
-            ? parseInt(info.total_supply) / Math.pow(10, decimals)
-            : null;
-          setTotalSupply(supply);
+          tokenDecimals = info.decimals ?? 6;
+          setDebugInfo((prev) => prev + `\nToken info loaded: ${info.name}, decimals: ${tokenDecimals}`);
         } else {
           setDebugInfo(
             (prev) =>
@@ -533,10 +545,24 @@ export default function USDCxDashboard() {
         // Process holders
         if (holdersResult.status === 'fulfilled' && holdersResult.value?.results) {
           setHolders(holdersResult.value.results);
-          setDebugInfo(
-            (prev) =>
-              prev + `\nHolders loaded: ${holdersResult.value.results.length}`
-          );
+          // Use total from holders endpoint for accurate holder count (nullish check)
+          if (holdersResult.value.total != null) {
+            setTotalHolderCount(holdersResult.value.total);
+          }
+          // Only use holders supply if official metrics didn't provide it
+          if (!metricsProvidedSupply && holdersResult.value.total_supply != null) {
+            const supply = parseInt(holdersResult.value.total_supply) / Math.pow(10, tokenDecimals);
+            setTotalSupply(supply);
+            setDebugInfo(
+              (prev) =>
+                prev + `\nHolders loaded: ${holdersResult.value.results.length}, total holders: ${holdersResult.value.total}, supply: ${supply}`
+            );
+          } else {
+            setDebugInfo(
+              (prev) =>
+                prev + `\nHolders loaded: ${holdersResult.value.results.length}, total: ${holdersResult.value.total}`
+            );
+          }
         } else if (
           holdersResult.status === 'fulfilled' &&
           Array.isArray(holdersResult.value)
@@ -606,7 +632,9 @@ export default function USDCxDashboard() {
   const filteredDaily = getFilteredData(dailyData);
 
   // Calculate stats - prefer official metrics when available
-  const totalHolders = usdcxMetrics?.uniqueHolders || holders.length;
+  // Priority: official metrics > API total count > array length
+  // Use ?? to preserve valid 0 values (|| would treat 0 as falsy)
+  const totalHolders = usdcxMetrics?.uniqueHolders ?? totalHolderCount ?? holders.length;
   const totalTxCount = dailyData.reduce((sum, d) => sum + d.transactions, 0);
   const totalMinted = dailyData.reduce((sum, d) => sum + d.minted, 0);
   const totalBurned = dailyData.reduce((sum, d) => sum + d.burned, 0);
